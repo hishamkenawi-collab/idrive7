@@ -169,15 +169,77 @@ function mMark(y) {
     ];
 }
 
+function mapRpm(o, key, x, w, reverse) {
+    const r = C.rpmScale(o);
+    return {
+        key, kind: 'band', x, y: 72, w, h: 28, z: 6,
+        params: {
+            u_geo: [4, 14, 0, 20],
+            u_span: [reverse ? -1 : 0, 0, Math.max(8, Math.round(w / 22)), 0.22],
+            u_marks: [0, 0, 0, 0], u_red: [r.red / r.max], u_soft: [0],
+        },
+        colors: (t, d) => ({
+            track: '#11161c', fill0: '#f4fbff', fill1: accentSoft(d),
+            redc: t.red, tip: '#ffffff', tick: '#7d8792', num: '#ffffff',
+        }),
+        value: (d) => (C.isNum(d.rpm) && d.engineOn !== false ? d.rpm / 1000 / r.max : 0),
+        max: 1, sweep: true,
+    };
+}
+
+/*
+ * Map mode is deliberately built ONLY around C.MAP (416,120 .. 1504,600).
+ * No Kenawiii layer intersects that rectangle, so Waze-on-cluster or the stock map
+ * can occupy slot 0x100 without the custom panel masking it.
+ */
 function mapFallback(o) {
-    const bot = C.MAP.y + C.MAP.h;
-    return C.aroundMap().map((r, i) => C.flat('bg' + i, r.x, r.y, r.w, r.h, 'bg')).concat([
-        gear(80, 210, 300, 190),
-        C.text('speedDigits', 80, 430, 260, 90, (d) => C.speedText(o, d), white, { align: 0 }),
-        C.text('speedUnit', 80, 525, 260, 24, C.speedUnit(o), dim, { align: 0 }),
-        shiftLights(o),
-        C.text('mapMode', 1520, bot + 20, 360, 26, progText, (t, d) => ({ color: [accent(d), 1], glow: [accent(d), 0.1] }), { align: 1 }),
-    ]);
+    const A = (t, d) => ({ color: [accent(d), 1] });
+    const modeC = (t, d) => ({ color: [accent(d), 1], glow: [accent(d), 0.10] });
+    const list = C.aroundMap().map((r, i) => C.flat('mapBg' + i, r.x, r.y, r.w, r.h, 'bg'));
+
+    // A thin cockpit bezel sits immediately OUTSIDE the native map window.
+    list.push(
+        C.flat('mapFrameTop', C.MAP.x, C.MAP.y - 7, C.MAP.w, 7, (t, d) => accent(d)),
+        C.flat('mapFrameBottom', C.MAP.x, C.MAP.y + C.MAP.h, C.MAP.w, 7, (t, d) => accent(d)),
+        C.flat('mapFrameLeft', C.MAP.x - 7, C.MAP.y, 7, C.MAP.h, (t, d) => accent(d)),
+        C.flat('mapFrameRight', C.MAP.x + C.MAP.w, C.MAP.y, 7, C.MAP.h, (t, d) => accent(d)),
+
+        // Split RPM bars avoid the camera cowl (x 730..1190, y 0..128).
+        mapRpm(o, 'mapRpmL', 450, 255, false),
+        mapRpm(o, 'mapRpmR', 1215, 255, true),
+
+        C.text('mapRpmLblL', 452, 101, 250, 16, 'RPM', dim, { align: 0, tracking: 0.14 }),
+        C.text('mapRpmLblR', 1218, 101, 250, 16, 'RPM', dim, { align: 1, tracking: 0.14 }),
+
+        // Left cockpit column: speed + gear + temperatures. Entirely left of x=416.
+        C.text('mapSpeed', 58, 194, 325, 132, (d) => C.speedText(o, d), white, { align: 0 }),
+        C.text('mapSpeedUnit', 62, 330, 250, 24, C.speedUnit(o), dim, { align: 0, tracking: 0.12 }),
+        gear(72, 360, 300, 150),
+        C.text('mapModeLeft', 72, 512, 300, 24, progText, modeC, { align: 0, tracking: 0.12 }),
+        C.text('mapOil', 62, 548, 150, 34, (d) => C.tempText(o, d.oil), white, { align: 0 }),
+        C.text('mapOilLbl', 62, 582, 150, 15, 'OIL', dim, { align: 0, tracking: 0.12 }),
+        C.text('mapCoolant', 230, 548, 160, 34, (d) => C.tempText(o, d.coolant), white, { align: 1 }),
+        C.text('mapCoolantLbl', 230, 582, 160, 15, 'COOLANT', dim, { align: 1, tracking: 0.12 }),
+
+        // Right cockpit column. Starts at x=1680: clear of the fixed KOMBI gear box.
+        { key: 'mapBoostLn', kind: 'flat', x: 1818, y: 300, w: 72, h: 4, colors: A },
+        C.text('mapBoost', 1680, 314, 210, 48, (d) => C.boostText(o, d), white, { align: 1 }),
+        C.text('mapBoostLbl', 1680, 365, 210, 16, 'BOOST', dim, { align: 1, tracking: 0.14 }),
+
+        { key: 'mapTorqueLn', kind: 'flat', x: 1818, y: 410, w: 72, h: 4, colors: A },
+        C.text('mapTorque', 1680, 424, 210, 48, (d) => C.torqueText(d), white, { align: 1 }),
+        C.text('mapTorqueLbl', 1680, 475, 210, 16, 'TORQUE', dim, { align: 1, tracking: 0.14 }),
+
+        C.text('mapOutside', 1680, 535, 210, 24, (d) => C.outsideText(o, d.outside), dim, { align: 1 }),
+        C.text('mapClock', 1680, 570, 210, 28, C.clock, white, { align: 1 }),
+
+        // Bottom strip is above the warning-light region (starts at y=652).
+        C.text('mapRange', 60, 618, 340, 24, (d) => C.distText(o, d.frange) + '  RANGE', white, { align: 0 }),
+        C.text('mapNav', 760, 616, 400, 26, 'NAVIGATION', modeC, { tracking: 0.18 }),
+        C.text('mapHint', 1518, 618, 372, 22, 'WAZE / STOCK MAP', dim, { align: 1, tracking: 0.10 })
+    );
+
+    return list;
 }
 
 module.exports = {
