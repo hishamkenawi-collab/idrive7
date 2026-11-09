@@ -841,13 +841,43 @@ void main() {
     if (v <= 0.001) { gl_FragColor = vec4(0.0); return; }
     vec2 p = v_uv;
     vec2 c = (p - 0.5) * vec2(u_size.x / u_size.y, 1.0);
-    float edge = smoothstep(0.30, 0.95, length(c));                 /* 0 centre .. 1 edges */
-    float breathe = 0.85 + 0.15 * sin(u_time * 5.0);
+    float edge = smoothstep(0.26, 0.95, length(c));                 /* 0 centre .. 1 edges */
+    float breathe = 0.82 + 0.18 * sin(u_time * 5.0);
     float bands = 0.06 * (0.5 + 0.5 * sin(p.x * 18.0 + p.y * 6.0 + u_time * 0.6)) * edge;
     float barTop = smoothstep(0.16, 0.0, p.y), barBot = smoothstep(0.82, 1.0, p.y);
-    vec3 col = mix(u_deep, u_edge, edge * edge) * breathe + u_glowc * bands + u_edge * (barTop + barBot) * 0.5 * breathe;
-    float a = v * clamp(0.34 + edge * 0.55 + (barTop + barBot) * 0.45, 0.0, 0.92);
+    /* a bright red frame hugging the whole panel edge: the reference's glowing red surround in the shift alert */
+    float border = min(min(p.x, 1.0 - p.x), min(p.y, 1.0 - p.y));
+    float frame = smoothstep(0.065, 0.0, border);
+    vec3 col = mix(u_deep, u_edge, edge * edge) * breathe + u_glowc * bands + u_edge * (barTop + barBot) * 0.5 * breathe + u_glowc * frame * breathe;
+    float a = v * clamp(0.40 + edge * 0.52 + (barTop + barBot) * 0.5 + frame * 0.55, 0.0, 0.96);
     gl_FragColor = vec4(col, a);
 }`;
 
-module.exports = { HIGHP, COMMON, GLYPH, FLAT_FS, PANEL_FS, DIAL_FS, BAND_FS, TEXT_FS, BG_FS, ICON_FS, SPARK_FS, CAR_FS, LEDS_FS, FLAG_FS, EAGLE_FS, FIREWORKS_FS, GEAR_FS, ATTACK_FS };
+/*
+ * CHEV_FS - an angular chevron bracket ("<" or ">") that frames the centre gear, the reference's aggressive
+ * supercar accent. One effect layer per side. u_dir: >0 draws ">", <0 draws "<". u_color is the stroke; u_hot
+ * (0..1, the engine's attack level) swells its red glow at the red line. No glyph atlas, no u_time.
+ */
+const CHEV_FS = `#version 100
+${HIGHP}
+uniform vec2 u_size;
+uniform vec4 u_color;
+uniform float u_hot;
+uniform float u_dir;
+varying vec2 v_uv;
+float segd(vec2 p, vec2 a, vec2 b) { vec2 pa = p - a, ba = b - a; float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0); return length(pa - ba * h); }
+void main() {
+    vec2 p = v_uv;
+    if (u_dir < 0.0) p.x = 1.0 - p.x;                 /* ">" by default, "<" when u_dir < 0 */
+    float asp = u_size.x / u_size.y;
+    vec2 q = vec2(p.x * asp, p.y);
+    vec2 vx = vec2(asp, 0.5);                         /* the vertex, at the outer edge, mid height */
+    float d = min(segd(q, vec2(0.0, 0.10), vx), segd(q, vec2(0.0, 0.90), vx));
+    float th = 0.05;                                  /* thin angular strokes, not a filled arrowhead */
+    float core = smoothstep(th, th - 0.022, d);
+    float glow = smoothstep(th * 2.6, th, d) * (0.10 + 0.6 * clamp(u_hot, 0.0, 1.0));
+    float a = core * u_color.a + glow * u_color.a * 0.55;
+    gl_FragColor = vec4(u_color.rgb, clamp(a, 0.0, 1.0));
+}`;
+
+module.exports = { HIGHP, COMMON, GLYPH, FLAT_FS, PANEL_FS, DIAL_FS, BAND_FS, TEXT_FS, BG_FS, ICON_FS, SPARK_FS, CAR_FS, LEDS_FS, FLAG_FS, EAGLE_FS, FIREWORKS_FS, GEAR_FS, ATTACK_FS, CHEV_FS };

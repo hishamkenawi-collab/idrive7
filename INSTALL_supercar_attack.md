@@ -43,10 +43,10 @@ sets none, so the normal Store install is always the full layout.
 
 | Stage | `SUPERCAR_STAGE` | What is drawn |
 |------|------------------|----------------|
-| A | `A` | black background, speed, rev bar, **large static gear** (no slam, no attack) |
+| A | `A` | black background, speed, arched rev bar, gear framed by chevrons, **static gear** (no slam, no attack) |
 | B | `B` | stage A **+ the gear-change slam animation** |
-| C | `C` | stage B **+ the red-line attack field and shift LEDs** |
-| D | unset | the full layout (adds oil/coolant, boost/power, clock, outside, range) |
+| C | `C` | stage B **+ the full-screen red-line attack field** |
+| D | unset | the full layout (adds oil/coolant and boost/power readouts, range, outside temp) |
 
 For each stage, in order A → B → C → D:
 

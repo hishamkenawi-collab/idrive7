@@ -80,7 +80,7 @@ function rpmBar(o, x, y, w, h) {
     const r = C.rpmScale(o);
     return {
         key: 'rpmBar', kind: 'band', x, y, w, h, z: 15,
-        params: { u_geo: [6, h / 2, 0, Math.max(6, h - 6)], u_span: [0, 0, Math.round(r.max * 4), 0.22], u_marks: [0, 0, 0, 0], u_red: [r.red / r.max], u_soft: [0] },
+        params: { u_geo: [7, h / 2, 0, Math.max(6, h - 8)], u_span: [0, 0, Math.round(r.max * 4), 0.3], u_marks: [0, 0, 0, 0], u_red: [r.red / r.max], u_soft: [0] },
         colors: (t) => ({ track: t.track, fill0: t.rpm0, fill1: t.amber, redc: t.red, tip: t.text, tick: t.dim, num: t.num }),
         value: (d) => (C.isNum(d.rpm) && d.engineOn !== false ? d.rpm / 1000 / r.max : 0), max: 1, sweep: true,
     };
@@ -96,7 +96,9 @@ function gear(x, y, w, h) {
         key: 'gear', kind: 'gear', x, y, w, h, text: gearBig, align: 0.5,
         trigger: gearNum, anim: { name: 'u_prog', keys: '0:0 230:1' },
         params: { u_prog: [1], u_pulse: [0] },
-        colors: (t, d) => ({ color: [atk.on || gearBig(d) === 'R' ? t.red : t.text, 1], glow: [atk.on ? t.red : t.accent, atk.on ? 0.4 : 0.2], impact: t.impact }),
+        // premium, not "huge text": a soft neutral halo in normal driving (never the look's accent, so Sport's red
+        // does not bleed onto the gear), a deliberate red glow only in the red-line attack.
+        colors: (t, d) => ({ color: [atk.on || gearBig(d) === 'R' ? t.red : t.text, 1], glow: [atk.on ? t.red : t.text, atk.on ? 0.3 : 0.07], impact: t.impact }),
         dyn: () => ({ u_pulse: [atk.on ? 1 : 0] }),
     };
 }
@@ -105,12 +107,49 @@ const attackField = (o) => ({
     params: {}, colors: (t) => ({ deep: t.deep, edge: t.edge, glowc: t.glowc }),
     value: (d) => attackLevel(o, d), max: 1,
 });
-/** A compact tile: card, label, value. */
+/** A compact tile: card, label, value (used by the map/stock safe fallbacks). */
 function tile(key, x, y, w, h, label, value, colours) {
     return [
         { key: key + 'Card', kind: 'panel', x, y, w, h, params: { u_box: [10, 1.5, 0.3, 1] }, colors: (t) => ({ top: t.tileTop, bottom: t.tileBottom, border: t.tileEdge }) },
         C.text(key + 'Lbl', x + 12, y + 8, w - 24, 16, label, lbl, { align: 0, tracking: 0.1 }),
         C.text(key, x + 12, y + 28, w - 24, h - 40, value, colours || white, { align: 0 }),
+    ];
+}
+
+/* ---------- the full-screen hero pieces ---------- */
+/** The arched rev bar (band arc mode, the same shader the dial layouts use): the signature sweep across the
+ * top, 0..n numbered, segmented, filling with rpm and turning red from the configured red line. The arc's
+ * centre sits far below the glass so the visible part is a shallow, wide sweep; the numerals are drawn just
+ * inside the arc so they clear the camera-cowl notch at the top middle of the real cluster. */
+function arcBar(o, cx, cy, R, T, half) {
+    const r = C.rpmScale(o);
+    const px = 110, py = 58, pw = 1700, ph = 320;                 // the piece covers the visible top of the arc
+    return {
+        key: 'rpmBar', kind: 'band', x: px, y: py, w: pw, h: ph, z: 6,
+        params: { u_geo: [cx - px, cy - py, R, T], u_span: [-half, half, Math.round(r.max * 4), 0.36],
+            u_marks: [r.max, 1, 34, -46], u_red: [r.red / r.max], u_soft: [0] },
+        // in the red-line attack the whole bar reads red (fill and track), so the top of the cluster goes red too
+        colors: (t) => (atk.on
+            ? { track: '#3a0908', fill0: t.red, fill1: '#ff6a2a', redc: t.red, tip: '#ffd0b0', tick: t.red, num: t.red }
+            : { track: t.track, fill0: t.rpm0, fill1: t.amber, redc: t.red, tip: t.text, tick: t.dim, num: t.num }),
+        value: (d) => (C.isNum(d.rpm) && d.engineOn !== false ? d.rpm / 1000 / r.max : 0), max: 1, sweep: true,
+    };
+}
+/** An angular chevron bracket framing the gear (chev shader): dir -1 = "<", +1 = ">". Neutral white, swelling
+ * red in the attack. */
+const chevron = (key, x, y, w, h, dir) => ({
+    key, kind: 'chev', x, y, w, h, params: { u_dir: [dir] },
+    colors: (t) => ({ color: [atk.on ? t.red : t.text, atk.on ? 1 : 0.9] }),
+    dyn: () => ({ u_hot: [atk.on ? 1 : 0] }),
+});
+/** A borderless performance readout: a short accent tick, a prominent value, a small label under it - no card.
+ * align 0 left, 1 right. The tick is orange normally, red in the attack. */
+function readout(key, x, y, w, label, value, align, vcol) {
+    const tickX = align === 1 ? x + w - 64 : x;
+    return [
+        { key: key + 'Ln', kind: 'flat', x: tickX, y, w: 64, h: 3, colors: (t) => ({ color: [atk.on ? t.red : t.impact, 1] }) },
+        C.text(key, x, y + 11, w, 46, value, vcol || white, { align }),
+        C.text(key + 'L', x, y + 60, w, 15, label, lbl, { align, tracking: 0.14 }),
     ];
 }
 
@@ -161,38 +200,44 @@ module.exports = {
             );
         }
 
-        // full screen (info) - the priority
-        const gearP = gear(690, 236, 540, 340);
-        const progP = C.text('progShift', 690, 582, 540, 40, progShift, (t, d) => ({ color: [atk.on ? t.red : t.accent, 1], glow: [atk.on ? t.red : t.accent, 0.2] }), { tracking: 0.28 });
-        const speedP = [C.text('speedDigits', 70, 252, 430, 176, (d) => C.speedText(o, d), white, { align: 0 }),
-            C.text('speedUnit', 70, 432, 430, 30, C.speedUnit(o), lbl, { align: 0, tracking: 0.12 })];
+        // full screen (info) - the priority, rebuilt toward the M-concept reference: a shallow ARCHED rev bar
+        // (0..n) sweeping across the top, a dominant CENTRE GEAR framed by angular chevrons with a quiet drive-
+        // mode line under it, big speed on the left, and borderless performance readouts (oil/coolant left,
+        // boost + torque/power right) tied together by thin accent ticks - no cards. The arc is sized to the real
+        // glass: its crown clears the camera-cowl notch and its ends stop short of the KOMBI's gear bracket.
+        const gearP = gear(730, 240, 460, 272);                       // centred on 960, the hero
+        const chevL = chevron('chevL', 566, 292, 88, 168, -1);        // < framing the gear
+        const chevR = chevron('chevR', 1266, 292, 88, 168, 1);        // >
+        const progP = C.text('progShift', 680, 520, 560, 26, progShift,
+            (t, d) => ({ color: [atk.on ? t.red : t.dim, 1], glow: [atk.on ? t.red : t.accent, atk.on ? 0.3 : 0] }), { tracking: 0.14 });
+        const speedP = [C.text('speedDigits', 72, 252, 420, 166, (d) => C.speedText(o, d), white, { align: 0 }),
+            C.text('speedUnit', 74, 426, 420, 26, C.speedUnit(o), lbl, { align: 0, tracking: 0.12 })];
+        const arc = arcBar(o, 960, 1650, 1500, 20, 16.5);             // centre x, centre y (below glass), radius, thickness, half-sweep°
+        const centre = [arc, gearP, chevL, chevR, progP].concat(speedP);
 
         /* Staged on-car diagnostic mode (development only). Production never sets a stage: app.json exposes no
-         * such setting and the Store build passes none, so STAGE is 'D' and the list below is exactly the full
-         * layout. Setting SUPERCAR_STAGE=A|B|C (env) or o.stage brings features up one at a time, so a black-square
-         * on the real cluster can be pinned to the feature that introduced it. See INSTALL_supercar_attack.md.
-         *   A: black background + speed + rev bar + a LARGE STATIC gear (no slam animation, no attack shader)
+         * such setting and the Store build passes none, so STAGE is 'D' and the list below is the full layout.
+         * SUPERCAR_STAGE=A|B|C (env) or o.stage brings features up one at a time so a black-square on the real
+         * cluster can be pinned to the feature that introduced it. See INSTALL_supercar_attack.md.
+         *   A: black background + speed + arched rev bar + gear framed by chevrons, a STATIC gear (no slam)
          *   B: A + the gear slam animation
-         *   C: B + the red-line attack field and the shift LEDs
-         *   D: the full layout (A..C + the tiles, clock, outside temp and range)  <- production default */
+         *   C: B + the full-screen red-line attack field
+         *   D: the full layout (A..C + the oil/coolant and boost/power readouts, range and outside temp) */
         const STAGE = String(o.stage || (typeof process !== 'undefined' && process.env && process.env.SUPERCAR_STAGE) || 'D').toUpperCase();
         if (STAGE !== 'D') {
             if (STAGE === 'A') { delete gearP.trigger; delete gearP.anim; }   // a static gear: no keyframe is ever fired
-            const core = [C.flat('bg', 0, 0, 1920, 720, 'bg'), rpmBar(o, 210, 176, 1500, 30), rpmNums(o, 210, 214, 1500, 18), gearP, progP].concat(speedP);
-            return STAGE === 'C' ? [attackField(o), shiftLights(o, 210, 138, 1500, 30, 15)].concat(core) : core;
+            const bg = C.flat('bg', 0, 0, 1920, 720, 'bg');
+            return STAGE === 'C' ? [bg, attackField(o)].concat(centre) : [bg].concat(centre);
         }
 
         return [C.flat('bg', 0, 0, 1920, 720, 'bg'), attackField(o)].concat(
-            [shiftLights(o, 210, 138, 1500, 30, 15), rpmBar(o, 210, 176, 1500, 30), rpmNums(o, 210, 214, 1500, 18)],
-            [gearP, progP],
-            speedP,
-            tile('oil', 70, 488, 200, 150, 'OIL', (d) => C.tempText(o, d.oil)),
-            tile('coolant', 282, 488, 200, 150, 'COOLANT', (d) => C.tempText(o, d.coolant)),
-            tile('boost', 1690, 300, 170, 130, boostLbl, boostNum(o)),
-            tile('power', 1690, 446, 170, 130, powerLbl, powerNum(o)),
-            [C.text('clock', 70, 650, 220, 30, C.clock, white, { align: 0 }),
-                C.text('outside', 300, 650, 220, 30, (d) => C.outsideText(o, d.outside), lbl, { align: 0 }),
-                C.text('frange', 1560, 650, 300, 30, (d) => C.distText(o, d.frange) + '  RANGE', white, { align: 1 })],
+            centre,
+            readout('oil', 78, 488, 180, 'OIL', (d) => C.tempText(o, d.oil), 0),
+            readout('coolant', 300, 488, 190, 'COOLANT', (d) => C.tempText(o, d.coolant), 0),
+            readout('boost', 1668, 316, 232, boostLbl, boostNum(o), 1),
+            readout('power', 1668, 452, 232, powerLbl, powerNum(o), 1),
+            [C.text('frange', 78, 636, 340, 24, (d) => C.distText(o, d.frange) + '  RANGE', white, { align: 0 }),
+                C.text('outside', 1600, 636, 316, 24, (d) => C.outsideText(o, d.outside), lbl, { align: 1 })],
         );
     },
 };

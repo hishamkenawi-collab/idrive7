@@ -47,7 +47,7 @@ const M_MOVES = {
     },
     // the giant gear and its line drop below the M KOMBI's two middle boxes (the shift bar, LEDs, speed and
     // the side tiles are already clear of them); the map/stock variants keep the gear in the left column.
-    supercar_attack: { info: { gear: { y: 430, h: 180 }, progShift: { y: 614, h: 28 } } },
+    supercar_attack: { info: { gear: { y: 432, h: 176 }, progShift: { y: 618, h: 26 }, chevL: { y: 452, h: 150 }, chevR: { y: 452, h: 150 } } },
     // the display between the dials narrowed clear of the left box
     analog_sport: { info: { lcd: { squeeze: [584, 186] } } },
     digital_round: { info: { card: { squeeze: [584, 186] } } },
