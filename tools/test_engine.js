@@ -61,15 +61,17 @@ LAYOUTS.forEach((L) => {
         const s = makeScene({ layout: id, data: {} });
         drive(s, 2, () => ({ speed: 50 * 1.609344, rpm: 2500, stage: 'D', gear: 3, oil: 100, coolant: 90 }));
         const t = textsOf(s);
-        ['D3', '50'].forEach((x) => assert(t.indexOf(x) >= 0, x + ' in ' + JSON.stringify(t)));
+        // the gear as this layout shows it (most show 'D3'; Supercar Attack shows the number alone, with the
+        // drive programme on its own line) - from the layout's own gearText, so the test stays correct for each
+        [L.gearText({ stage: 'D', gear: 3 }), '50'].forEach((x) => assert(t.indexOf(x) >= 0, x + ' in ' + JSON.stringify(t)));
         const vals = s.engine._pieces().filter((p) => p.value !== null).map((p) => p.value);
         assert(vals.some((v) => Math.abs(v - 50) < 0.3 || Math.abs(v - 50 / 160) < 0.003), 'speed ' + vals);
         s.stop();
     });
-    check(id + ': S on the selector shows S3', () => {
+    check(id + ': S on the selector shows the sport gear', () => {
         const s = makeScene({ layout: id, data: {} });
         drive(s, 1, () => ({ speed: 60, rpm: 4000, stage: 'D', gear: 3, mode: 'S' }));
-        assert(textsOf(s).indexOf('S3') >= 0);
+        assert(textsOf(s).indexOf(L.gearText({ stage: 'D', gear: 3, mode: 'S' })) >= 0);
         s.stop();
     });
     check(id + ': centre left to the stock cluster: nothing over the middle', () => {

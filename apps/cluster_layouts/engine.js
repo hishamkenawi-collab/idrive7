@@ -17,13 +17,17 @@
  * layer is hidden, the service releases the panel and the stock gauges are back.
  *
  * A piece (layout_*.js pieces(o)):
- *   { key, kind: 'flat' | 'panel' | 'dial' | 'band' | 'text' | 'bg' | 'icon' | 'spark' | 'car' | 'leds', x, y, w, h, z,
+ *   { key, kind: 'flat' | 'panel' | 'dial' | 'band' | 'text' | 'bg' | 'icon' | 'spark' | 'car' | 'leds' | 'gear' | 'attack', x, y, w, h, z,
  *     params: { u_name: [numbers] }       fixed uniforms (sent once),
  *     colors(t, d) -> { name: '#rrggbb' | ['#rrggbb', a] }   sent as u_<name> (vec3, or vec4 with a) when they change,
  *     value(d) -> number, max             dial: the reading on its scale (max: the scale's end); band: 0..1,
  *     sweep: true                         part of the start-up sweep,
  *     group: 'name'                       built only while that group is active (setGroup: a page),
  *     dyn(d, t) -> { u_name: [numbers] }  more uniforms, sent when they change (at the text rate),
+ *     trigger(d) -> number | null, anim: { name, keys }   a one-shot uniform keyframe (cr.animate) played on
+ *       the renderer's clock when trigger's value changes between two non-null values (the gear kind's shift
+ *       animation); null means "no animation across this" (P/R/N),
+ *     text: ... (gear: a line of glyphs scaled and glowed by the animation, GEAR_FS),
  *     sample(d) -> 0..1, every            a trend line's samples (kind spark), every `every` ms (2 s),
  *     time: true                          u_time from the renderer's clock (car and leds always),
  *     text: 'fixed' | (d, t) -> string, align (0 left .. 1 right), tracking (glyph heights)   texts }
@@ -43,10 +47,10 @@ const TAU_MS = 30;           // a needle's easing towards its reading: smooth be
 const MIN_GAP_MS = 4;        // a reading's update at most this soon after the last
 const EPS = 0.0015;          // a value moving less than this (of its max) is not sent
 const SWEEP_MS = 700;        // up, then as long back down
-const FS = { flat: SH.FLAT_FS, panel: SH.PANEL_FS, dial: SH.DIAL_FS, band: SH.BAND_FS, text: SH.TEXT_FS, bg: SH.BG_FS, icon: SH.ICON_FS, spark: SH.SPARK_FS, car: SH.CAR_FS, leds: SH.LEDS_FS, flag: SH.FLAG_FS, eagles: SH.EAGLE_FS, fireworks: SH.FIREWORKS_FS };
-const Z = { flag: -210, bg: -200, fireworks: -190, eagles: -180, flat: -100, panel: -50, spark: -20, band: 0, dial: 0, car: 0, leds: 0, text: 20, icon: 20 };
+const FS = { flat: SH.FLAT_FS, panel: SH.PANEL_FS, dial: SH.DIAL_FS, band: SH.BAND_FS, text: SH.TEXT_FS, bg: SH.BG_FS, icon: SH.ICON_FS, spark: SH.SPARK_FS, car: SH.CAR_FS, leds: SH.LEDS_FS, flag: SH.FLAG_FS, eagles: SH.EAGLE_FS, fireworks: SH.FIREWORKS_FS, gear: SH.GEAR_FS, attack: SH.ATTACK_FS };
+const Z = { flag: -210, bg: -200, fireworks: -190, eagles: -180, flat: -100, panel: -50, spark: -20, band: 0, dial: 0, car: 0, leds: 0, attack: 10, text: 20, icon: 20, gear: 20 };
 /* kinds that animate on the renderer's own clock (u_time): nothing is sent to move them */
-const TIMED = { car: true, leds: true, flag: true, eagles: true, fireworks: true };
+const TIMED = { car: true, leds: true, flag: true, eagles: true, fireworks: true, gear: true, attack: true };
 const HIST = 64;
 /* the most layers up at once while one set replaces another (the service allows 64 an app) */
 const MAX_AT_ONCE = 60;
@@ -69,6 +73,12 @@ function startCluster(opts) {
     // stock map in Map view while a layer wants it (contend)
     const TARGET = opts.target || 'panel', contend = !!opts.contend, zShift = opts.z || 0;
     let specs = [], pieces = [], fontRef = 0, fontFam = null, shown = false, built = false, sweepEnd = 0, group = opts.group || null;
+    /* Black-square diagnostics (opt-in: CLUSTER_DIAG set). Off by default, so normal operation logs nothing new.
+     * When on, the stock-return path is traced - how many layers are dropped, and the renderer's own status
+     * immediately after hiding - so a real-car QR/USB log can show whether the renderer still thinks a layer
+     * exists after the layout handed the panel back. One line per transition, never per frame. */
+    const DIAG = !!(typeof process !== 'undefined' && process.env && process.env.CLUSTER_DIAG);
+    let diagWantStatus = false;
     /* only the active group's pieces (a page) are built; pieces without a group always */
     const inGroup = (p) => !p.spec.group || p.spec.group === group;
     const hist = new Map();          // trend lines' samples by piece key, kept across pages and rebuilds
@@ -96,7 +106,10 @@ function startCluster(opts) {
     // the renderer's status text (its targets and every slot the KOMBI reports, from the renderer), asked
     // for every few seconds while shown, for the app's page
     let statusText = '', statusAt = 0;
-    cr.on('status', (text) => { statusText = String(text || ''); });
+    cr.on('status', (text) => {
+        statusText = String(text || '');
+        if (DIAG && diagWantStatus) { diagWantStatus = false; log.info('diag: renderer status after hide: ' + statusText.replace(/\s+/g, ' ').trim()); }
+    });
     cr.on('error', (e) => { state.renderer = 'not reachable'; warnOnce(String((e && e.message) || e)); });
 
     /* The free/open-source credit is shown on each app's own screen (the head unit menu), not drawn on the
@@ -140,9 +153,9 @@ function startCluster(opts) {
             // is never left empty (which would hand it back to the stock HMI)
             const ref = cr.effect({ target: TARGET, klass: 'content', z: zShift + (s.z !== undefined ? s.z : Z[s.kind]), x: s.x, y: s.y, w: s.w, h: s.h, fs: FS[s.kind], visible: shown, contend, time: !!(s.time || TIMED[s.kind]) });
             if (!ref) { warnOnce('piece ' + s.key + ' refused here'); return; }
-            const p = { ref, spec: s, colours: '', text: null, value: 0, sent: -1, anim: 0, dyn: '', histSent: -1 };
+            const p = { ref, spec: s, colours: '', text: null, value: 0, sent: -1, anim: 0, dyn: '', histSent: -1, trig: undefined };
             if (s.kind !== 'flat') cr.uniform(ref, 'u_size', [s.w, s.h]);
-            if (s.kind === 'dial' || s.kind === 'band' || s.kind === 'text') {
+            if (s.kind === 'dial' || s.kind === 'band' || s.kind === 'text' || s.kind === 'gear') {
                 cr.bind(ref, 'u_font', fontRef);
                 cr.uniform(ref, 'u_font_cells', fontCells());
                 cr.uniform(ref, 'u_digit_adv', [Math.round(font.digitAdvance(fam()) * 1000) / 1000]);
@@ -184,7 +197,7 @@ function startCluster(opts) {
                     cr.uniform(p.ref, 'u_count', [H.list.length]);
                 }
             }
-            if (s.kind === 'text') {
+            if (s.kind === 'text' || s.kind === 'gear') {
                 const txt = typeof s.text === 'function' ? String(s.text(d, t)) : String(s.text);
                 if (force || txt !== p.text) {
                     p.text = txt;
@@ -192,6 +205,17 @@ function startCluster(opts) {
                     cr.uniform(p.ref, 'u_text', ln.codes, { type: 'vec4' });
                     cr.uniform(p.ref, 'u_x', ln.centres, { type: 'vec4' });
                 }
+            }
+            /* a one-shot animation the renderer keyframes on its own clock when a trigger value changes (the gear
+             * on an up/downshift): nothing is sent per frame. s.trigger(d) returns the value to watch (null: no
+             * animation across it, e.g. P/R/N); s.anim: { name, keys } for cr.animate. Fires only between two
+             * non-null values, so engaging or leaving drive does not slam the gear. */
+            if (s.trigger && s.anim) {
+                const tv = s.trigger(d);
+                if (!force && p.trig !== undefined && p.trig !== null && tv !== null && tv !== p.trig) {
+                    cr.animate(p.ref, { property: 'uniform', name: s.anim.name, keys: s.anim.keys, loop: false });
+                }
+                p.trig = tv;
             }
         });
     }
@@ -258,8 +282,10 @@ function startCluster(opts) {
         } else {
             endSweep();
             shown = false;
+            if (DIAG) log.info('diag: hiding ' + pieces.length + ' layers (refs ' + pieces.map((p) => p.ref).join(',') + '); font asset ' + fontRef + ' kept, target handed back');
             pieces.forEach((p) => cr.drop(p.ref));
             pieces = []; built = false;
+            if (DIAG) { diagWantStatus = true; try { cr.status(); } catch (e) { /* not connected: the renderer drops the scene on disconnect */ } }
         }
         log.info(on ? 'layout shown on the cluster' : 'layout hidden: the stock cluster is back');
     }
@@ -326,7 +352,7 @@ function startCluster(opts) {
         perf: () => ({ n: perf.n, avgMs: perf.n ? Math.round(perf.totalMs / perf.n * 1000) / 1000 : 0, maxMs: Math.round(perf.maxMs * 1000) / 1000 }),
         /** For the tests: the built pieces and what each shows now. */
         _pieces: () => pieces.map((p) => ({ key: p.spec.key, kind: p.spec.kind, x: p.spec.x, y: p.spec.y, w: p.spec.w, h: p.spec.h, geo: (p.spec.params || {}).u_geo,
-            text: p.spec.kind === 'text' ? (typeof p.spec.text === 'function' ? p.text : String(p.spec.text)) : null, value: p.spec.value ? p.value : null, layer: p.ref,
+            text: (p.spec.kind === 'text' || p.spec.kind === 'gear') ? (typeof p.spec.text === 'function' ? p.text : String(p.spec.text)) : null, value: p.spec.value ? p.value : null, layer: p.ref,
             group: p.spec.group || null, params: p.spec.params || {} })),
         /** For the tests: the groups (pages) the layout has now. */
         _groups: () => Array.from(new Set(specs.map((s) => s.group).filter(Boolean))),

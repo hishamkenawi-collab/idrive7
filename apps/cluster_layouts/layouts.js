@@ -3,7 +3,7 @@
  * layouts.js - the layouts this app offers, by id. A layout is one file, layout_<id>.js, next to this one
  * (the build ships only top-level .js files); list it here and in app.json's "layout" setting (README.md).
  */
-const LAYOUTS = [require('./layout_analog_sport'), require('./layout_digital_round'), require('./layout_modern_wide'), require('./layout_digital_dash'), require('./layout_freedom'), require('./layout_retro'), require('./layout_track')];
+const LAYOUTS = [require('./layout_analog_sport'), require('./layout_digital_round'), require('./layout_modern_wide'), require('./layout_digital_dash'), require('./layout_freedom'), require('./layout_retro'), require('./layout_track'), require('./layout_supercar_attack')];
 /* with Settings > Frame behind the gear box on: the bezel behind the KOMBI's gear bracket (layout_common.boxBezel),
  * just above the backgrounds. Off (the default, from the car: the frame read as a stray grey box) the box sits on
  * the layout's own black background and its black window disappears into it */
@@ -45,6 +45,9 @@ const M_MOVES = {
             ['oil', 'coolant', 'gearbox'].reduce((m, id) => { m['c_' + id + 'V'] = { w: 290 }; m['c_' + id + 'L'] = { w: 290 }; return m; }, {}),
             shiftAll(['c_railI', 'c_railV', 'c_railL', 'c_battI', 'c_battV', 'c_battL'], 110), shiftAll(['c_boostI', 'c_boostV', 'c_boostL'], 110)),
     },
+    // the giant gear and its line drop below the M KOMBI's two middle boxes (the shift bar, LEDs, speed and
+    // the side tiles are already clear of them); the map/stock variants keep the gear in the left column.
+    supercar_attack: { info: { gear: { y: 430, h: 180 }, progShift: { y: 614, h: 28 } } },
     // the display between the dials narrowed clear of the left box
     analog_sport: { info: { lcd: { squeeze: [584, 186] } } },
     digital_round: { info: { card: { squeeze: [584, 186] } } },

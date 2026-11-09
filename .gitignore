@@ -15,6 +15,7 @@ __pycache__/
 !docs/*.png
 !docs/centre/*.png
 !docs/centre/modern/*.png
+!docs/supercar_attack/*.png
 
 # the attribution signing key stays local, never pushed
 secret/

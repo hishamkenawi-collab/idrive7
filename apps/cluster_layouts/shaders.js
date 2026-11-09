@@ -764,4 +764,90 @@ void main() {
     gl_FragColor = vec4(a > 0.0 ? min(col / max(a, 0.001), vec3(1.0)) : vec3(0.0), a);
 }`;
 
-module.exports = { HIGHP, COMMON, GLYPH, FLAT_FS, PANEL_FS, DIAL_FS, BAND_FS, TEXT_FS, BG_FS, ICON_FS, SPARK_FS, CAR_FS, LEDS_FS, FLAG_FS, EAGLE_FS, FIREWORKS_FS };
+/**
+ * The animated gear (Supercar Attack): the same SDF glyph line as TEXT, scaled and faded by a one-shot
+ * animation the renderer keyframes on its own clock (engine.js trigger/anim) - nothing is sent per frame.
+ *   u_prog    0..1 gear-change animation (1 = settled, drawn normally); keyframed 0->1 on an up/downshift
+ *   u_pulse   0/1 full-redline red glow (breathes on u_time)
+ *   u_impact  the orange impact-glow colour
+ * The entrance uses an easeOutBack overshoot: the new gear slams in oversized, overshoots and settles, with a
+ * brief orange impact glow. P/R/N never trigger it (engine.js fires only between two numbered gears).
+ */
+const GEAR_FS = `#version 100
+${HIGHP}${GLYPH}
+uniform vec2 u_size;
+uniform vec4 u_text[8];
+uniform vec4 u_x[8];
+uniform vec4 u_color;
+uniform vec4 u_glow;
+uniform float u_prog;
+uniform float u_pulse;
+uniform highp float u_time;
+uniform vec3 u_impact;
+varying vec2 v_uv;
+float easeOutBack(float t) { float c1 = 1.70158, c3 = c1 + 1.0, u = t - 1.0; return 1.0 + c3 * u * u * u + c1 * u * u; }
+void main() {
+    float h = u_size.y, cxText = (u_size.x / h) * 0.5;
+    float prog = clamp(u_prog, 0.0, 1.0);
+    float e = easeOutBack(prog);
+    float scale = mix(1.55, 1.0, e);                 /* slam in oversized, overshoot, settle */
+    float appear = smoothstep(0.0, 0.35, prog);      /* fade in */
+    float dy = (1.0 - prog) * -0.05;                 /* a slight vertical slam */
+    float x = v_uv.x * u_size.x / h;
+    x = cxText + (x - cxText) / scale;               /* scale around the centre */
+    float vy = 0.5 + (v_uv.y - 0.5) / scale + dy;
+    float best = 1e4, code = -1.0, cx = 0.0, best2 = 1e4, code2 = -1.0, cx2 = 0.0;
+    for (int i = 0; i < 8; i++) {
+        vec4 c = u_x[i], k = u_text[i];
+        for (int j = 0; j < 4; j++) {
+            float cj = j == 0 ? c.x : j == 1 ? c.y : j == 2 ? c.z : c.w;
+            float kj = j == 0 ? k.x : j == 1 ? k.y : j == 2 ? k.z : k.w;
+            float dj = abs(x - cj);
+            if (dj < best) { best2 = best; code2 = code; cx2 = cx; best = dj; code = kj; cx = cj; }
+            else if (dj < best2) { best2 = dj; code2 = kj; cx2 = cj; }
+        }
+    }
+    float s = max(sdf(code, vec2(x - cx, vy)), sdf(code2, vec2(x - cx2, vy)));
+    float ink = smoothstep(0.5 - 2.0 / h, 0.5 + 2.0 / h, s);
+    float halo = smoothstep(0.12, 0.5, s) * (1.0 - ink);
+    float z = (prog - 0.12) / 0.10;
+    float impact = exp(-z * z) * (prog < 0.99 ? 1.0 : 0.0);         /* the entry's orange flash */
+    float pulse = u_pulse * (0.55 + 0.45 * sin(u_time * 8.0));       /* the full-redline red breath */
+    float glowAmt = u_glow.a + impact * 0.9 + pulse * 0.85;
+    vec3 glowCol = mix(u_glow.rgb, u_impact, clamp(impact + pulse, 0.0, 1.0));
+    float a = ink * u_color.a * appear + halo * glowAmt * 0.8;
+    vec3 col = a > 0.0 ? (u_color.rgb * ink * u_color.a * appear + glowCol * halo * glowAmt * 0.8) / a : u_color.rgb;
+    gl_FragColor = vec4(col, clamp(a, 0.0, 1.0));
+}`;
+
+/**
+ * The full-redline "attack" wash (Supercar Attack), one layer over the whole panel. A deep black-red field with
+ * bright red top and bottom bars and glowing edges, a faint angular detail and a slow breath on u_time; the
+ * centre is kept dark and low-alpha so the gear and speed above it stay legible. u_value (0..1, eased by the
+ * engine with hysteresis in the layout) fades the whole thing in and out, so it is one clean transition, not a
+ * flat red rectangle snapping on.
+ */
+const ATTACK_FS = `#version 100
+${HIGHP}${COMMON}
+uniform vec2 u_size;
+uniform float u_value;
+uniform highp float u_time;
+uniform vec3 u_deep;
+uniform vec3 u_edge;
+uniform vec3 u_glowc;
+varying vec2 v_uv;
+void main() {
+    float v = clamp(u_value, 0.0, 1.0);
+    if (v <= 0.001) { gl_FragColor = vec4(0.0); return; }
+    vec2 p = v_uv;
+    vec2 c = (p - 0.5) * vec2(u_size.x / u_size.y, 1.0);
+    float edge = smoothstep(0.30, 0.95, length(c));                 /* 0 centre .. 1 edges */
+    float breathe = 0.85 + 0.15 * sin(u_time * 5.0);
+    float bands = 0.06 * (0.5 + 0.5 * sin(p.x * 18.0 + p.y * 6.0 + u_time * 0.6)) * edge;
+    float barTop = smoothstep(0.16, 0.0, p.y), barBot = smoothstep(0.82, 1.0, p.y);
+    vec3 col = mix(u_deep, u_edge, edge * edge) * breathe + u_glowc * bands + u_edge * (barTop + barBot) * 0.5 * breathe;
+    float a = v * clamp(0.34 + edge * 0.55 + (barTop + barBot) * 0.45, 0.0, 0.92);
+    gl_FragColor = vec4(col, a);
+}`;
+
+module.exports = { HIGHP, COMMON, GLYPH, FLAT_FS, PANEL_FS, DIAL_FS, BAND_FS, TEXT_FS, BG_FS, ICON_FS, SPARK_FS, CAR_FS, LEDS_FS, FLAG_FS, EAGLE_FS, FIREWORKS_FS, GEAR_FS, ATTACK_FS };
