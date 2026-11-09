@@ -47,8 +47,8 @@ const TAU_MS = 30;           // a needle's easing towards its reading: smooth be
 const MIN_GAP_MS = 4;        // a reading's update at most this soon after the last
 const EPS = 0.0015;          // a value moving less than this (of its max) is not sent
 const SWEEP_MS = 700;        // up, then as long back down
-const FS = { flat: SH.FLAT_FS, panel: SH.PANEL_FS, dial: SH.DIAL_FS, band: SH.BAND_FS, text: SH.TEXT_FS, bg: SH.BG_FS, icon: SH.ICON_FS, spark: SH.SPARK_FS, car: SH.CAR_FS, leds: SH.LEDS_FS, flag: SH.FLAG_FS, eagles: SH.EAGLE_FS, fireworks: SH.FIREWORKS_FS, gear: SH.GEAR_FS, attack: SH.ATTACK_FS, chev: SH.CHEV_FS };
-const Z = { flag: -210, bg: -200, fireworks: -190, eagles: -180, flat: -100, panel: -50, spark: -20, band: 0, dial: 0, car: 0, leds: 0, attack: 10, chev: 16, text: 20, icon: 20, gear: 20 };
+const FS = { flat: SH.FLAT_FS, panel: SH.PANEL_FS, dial: SH.DIAL_FS, band: SH.BAND_FS, text: SH.TEXT_FS, bg: SH.BG_FS, icon: SH.ICON_FS, spark: SH.SPARK_FS, car: SH.CAR_FS, leds: SH.LEDS_FS, flag: SH.FLAG_FS, eagles: SH.EAGLE_FS, fireworks: SH.FIREWORKS_FS, gear: SH.GEAR_FS, attack: SH.ATTACK_FS, chev: SH.CHEV_FS, frame: SH.FRAME_FS };
+const Z = { flag: -210, bg: -200, fireworks: -190, eagles: -180, flat: -100, attack: -60, frame: -45, panel: -50, spark: -20, band: 0, dial: 0, car: 0, leds: 0, chev: 16, text: 20, icon: 20, gear: 20 };
 /* kinds that animate on the renderer's own clock (u_time): nothing is sent to move them */
 const TIMED = { car: true, leds: true, flag: true, eagles: true, fireworks: true, gear: true, attack: true };
 const HIST = 64;
@@ -78,7 +78,9 @@ function startCluster(opts) {
      * immediately after hiding - so a real-car QR/USB log can show whether the renderer still thinks a layer
      * exists after the layout handed the panel back. One line per transition, never per frame. */
     const DIAG = !!(typeof process !== 'undefined' && process.env && process.env.CLUSTER_DIAG);
-    let diagWantStatus = false;
+    let diagWantStatus = false, hideAt = 0, lastSentAt = 0;
+    const since = () => (hideAt ? '+' + (Date.now() - hideAt) + 'ms' : 't0');
+    const dlog = (m) => { if (DIAG) log.info('diag ' + since() + ': ' + m); };
     /* only the active group's pieces (a page) are built; pieces without a group always */
     const inGroup = (p) => !p.spec.group || p.spec.group === group;
     const hist = new Map();          // trend lines' samples by piece key, kept across pages and rebuilds
@@ -90,6 +92,9 @@ function startCluster(opts) {
     cr.on('disconnected', () => { state.renderer = 'reconnecting'; });
     cr.on('target', (name, st, holder, reason) => {
         if (name !== TARGET) return;
+        // the stock-reclaim signal: when this fires with a stock/other holder after a hide, the renderer has
+        // taken the panel back. The delay from the hide is the window in which a stale black frame could show.
+        if (hideAt) dlog("target '" + name + "' -> state=" + st + " holder=" + (holder || '-') + (reason ? ' reason=' + reason : '') + ' (this is the stock-reclaim event)');
         state.target = st + (holder ? ' (' + holder + ')' : '') + (reason ? ': ' + reason : '');
         if (/scene id in use/.test(reason || '') && TARGET !== 'map') state.target += ' - an app on the HUD (Waze?) holds it';
         log.info(TARGET + ' ' + state.target);
@@ -108,7 +113,7 @@ function startCluster(opts) {
     let statusText = '', statusAt = 0;
     cr.on('status', (text) => {
         statusText = String(text || '');
-        if (DIAG && diagWantStatus) { diagWantStatus = false; log.info('diag: renderer status after hide: ' + statusText.replace(/\s+/g, ' ').trim()); }
+        if (DIAG && diagWantStatus) { diagWantStatus = false; dlog('renderer status after hide (what it still reports drawing): ' + statusText.replace(/\s+/g, ' ').trim()); }
     });
     cr.on('error', (e) => { state.renderer = 'not reachable'; warnOnce(String((e && e.message) || e)); });
 
@@ -282,9 +287,12 @@ function startCluster(opts) {
         } else {
             endSweep();
             shown = false;
-            if (DIAG) log.info('diag: hiding ' + pieces.length + ' layers (refs ' + pieces.map((p) => p.ref).join(',') + '); font asset ' + fontRef + ' kept, target handed back');
+            hideAt = Date.now();
+            const refs = pieces.map((p) => p.ref);
+            if (DIAG) log.info('diag t0: HIDE at wall ' + hideAt + ' (' + new Date(hideAt).toISOString() + '); last custom frame ' + (lastSentAt ? (hideAt - lastSentAt) + 'ms ago' : 'n/a') + '; dropping ' + refs.length + ' layers refs [' + refs.join(',') + ']; font asset ' + fontRef + ' kept');
             pieces.forEach((p) => cr.drop(p.ref));
             pieces = []; built = false;
+            dlog('all ' + refs.length + ' drop ops sent; client now holds ' + (fontRef ? '1 (font asset)' : '0') + ' layers; socket pending ' + (cr.pendingBytes ? cr.pendingBytes() : '?') + ' bytes');
             if (DIAG) { diagWantStatus = true; try { cr.status(); } catch (e) { /* not connected: the renderer drops the scene on disconnect */ } }
         }
         log.info(on ? 'layout shown on the cluster' : 'layout hidden: the stock cluster is back');
@@ -297,6 +305,7 @@ function startCluster(opts) {
         const on = !!opts.enabled(), live = !!opts.live(), now0 = Date.now();
         if (live) notLiveAt = 0; else if (!notLiveAt) notLiveAt = now0;
         const want = on && (live || (shown && now0 - notLiveAt < LIVE_GRACE_MS)), was = shown;
+        if (want) { lastSentAt = now0; hideAt = 0; }   // for the black-square diagnostics: the time of the last live frame
         setShown(want);
         if (want && !was) return;   // just built, with everything sent
         if (Date.now() - statusAt > 3000) { statusAt = Date.now(); try { cr.status(); } catch (e) { /* not connected yet */ } }
@@ -341,7 +350,11 @@ function startCluster(opts) {
         rebuild, setGroup,
         group: () => group,
         recolour: () => update(true),
-        stop() { clearInterval(timer); setShown(false); cr.close(); },
+        stop() {
+            clearInterval(timer); setShown(false);
+            dlog('STOP: closing socket; pending ' + (cr.pendingBytes ? cr.pendingBytes() : '?') + ' bytes unflushed at close (if > 0, an abrupt teardown would lose these drop ops - scenario E)');
+            cr.close();
+        },
         status: () => ({ shown, renderer: state.renderer, target: state.target, layers: pieces.length, pieces: pieces.length, refused: state.refused }),
         /** The renderer's own status text (empty until it answers). */
         rendererStatus: () => statusText,

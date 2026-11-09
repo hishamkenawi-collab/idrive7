@@ -24,11 +24,27 @@ const PALETTES = {
 const BASE = {
     bg: '#000000', text: '#ffffff', dim: '#8a93a0', track: '#15181d', red: '#ff2a1f', amber: '#ffab00',
     rpm0: '#e6edf5', rpm1: '#ff9f1a', num: '#ffffff', tip: '#ffffff', impact: '#ff6a00',
+    frame: '#c6d0dd', silver: '#cdd6e2',                  // the cool-white cluster frame
     tileTop: '#101216', tileBottom: '#070809', tileEdge: '#242a31', off: '#181b20', green: '#39e07a', yellow: '#ffc400',
     ev: '#4ab4ff', regen: '#3ddc84',
     deep: '#1a0604', edge: '#ff2414', glowc: '#ff5a32',   // the attack field
 };
 const pal = (lookId) => Object.assign({}, BASE, PALETTES[lookId] || PALETTES.comfort);
+
+/* ---------- live drive-mode theme (RULE 4): the frame stays cool white and the performance accents (side bars,
+ * rev tip, chevron tint) step up in red from COMFORT -> SPORT -> SPORT INDIVIDUAL/SPORT+. The red-line attack
+ * (atk.on) overrides everything to full red. This reads the LIVE drive mode from the car, not the look setting. */
+const RED = '#ff2a1f';
+function driveLvl(d) {
+    const m = String((d && (d.driveMode || d.mode)) || '').toUpperCase();
+    if (/INDIVIDUAL|SPORT\s*\+|SPORT\+/.test(m)) return 2;
+    if (/SPORT|MANUAL|^S$|^M$/.test(m)) return 1;
+    return 0;
+}
+/** The performance accent for the live drive mode (side bars, rev tip): restrained in Comfort, bright red in Sport+. */
+const accentOf = (d) => (atk.on ? RED : driveLvl(d) >= 2 ? RED : driveLvl(d) >= 1 ? '#e5452e' : '#7f3a2a');
+/** The warm end of the rev bar fill: amber in Comfort, hotter in Sport. */
+const revHot = (t, d) => (atk.on ? RED : driveLvl(d) >= 1 ? '#ff6a2a' : t.amber);
 
 const white = (t) => ({ color: [t.text, 1], glow: [t.accent, 0.1] });
 const lbl = (t) => ({ color: [t.dim, 1], glow: [t.accent, 0] });
@@ -128,10 +144,11 @@ function arcBar(o, cx, cy, R, T, half) {
         key: 'rpmBar', kind: 'band', x: px, y: py, w: pw, h: ph, z: 6,
         params: { u_geo: [cx - px, cy - py, R, T], u_span: [-half, half, Math.round(r.max * 4), 0.36],
             u_marks: [r.max, 1, 34, -46], u_red: [r.red / r.max], u_soft: [0] },
-        // in the red-line attack the whole bar reads red (fill and track), so the top of the cluster goes red too
-        colors: (t) => (atk.on
+        // in the red-line attack the whole bar reads red (fill and track); otherwise the warm end of the fill
+        // steps up with the live drive mode (amber in Comfort, hotter in Sport)
+        colors: (t, d) => (atk.on
             ? { track: '#3a0908', fill0: t.red, fill1: '#ff6a2a', redc: t.red, tip: '#ffd0b0', tick: t.red, num: t.red }
-            : { track: t.track, fill0: t.rpm0, fill1: t.amber, redc: t.red, tip: t.text, tick: t.dim, num: t.num }),
+            : { track: t.track, fill0: t.rpm0, fill1: revHot(t, d), redc: t.red, tip: t.text, tick: t.dim, num: t.num }),
         value: (d) => (C.isNum(d.rpm) && d.engineOn !== false ? d.rpm / 1000 / r.max : 0), max: 1, sweep: true,
     };
 }
@@ -142,12 +159,37 @@ const chevron = (key, x, y, w, h, dir) => ({
     colors: (t) => ({ color: [atk.on ? t.red : t.text, atk.on ? 1 : 0.9] }),
     dyn: () => ({ u_hot: [atk.on ? 1 : 0] }),
 });
-/** A borderless performance readout: a short accent tick, a prominent value, a small label under it - no card.
- * align 0 left, 1 right. The tick is orange normally, red in the attack. */
+/** The angular cluster frame: one clearance-exempt background layer drawing the central trapezoid (holds speed,
+ * gear and the rev bar) and the two side housings (temps left, boost/torque right) - the M-concept silhouette.
+ * Cool white, red in the attack. Segments are x0,y0,x1,y1 in 1920x720 panel pixels. */
+const FRAME_SEGS = [
+    [548, 176, 392, 604],       // central trapezoid: left diagonal
+    [1372, 176, 1528, 604],     // right diagonal
+    [392, 604, 1528, 604],      // bottom edge
+    [548, 176, 700, 176],       // short top shoulders (the crown is the rev arc between them)
+    [1220, 176, 1372, 176],
+    [40, 300, 300, 286],        // left housing (temps): top
+    [36, 300, 36, 566],         //   outer
+    [36, 566, 300, 552],        //   bottom
+    [1620, 286, 1880, 300],     // right housing (boost/torque): top
+    [1884, 300, 1884, 566],     //   outer
+    [1620, 552, 1884, 566],     //   bottom
+];
+function frame() {
+    const p = { u_nseg: [FRAME_SEGS.length] };
+    FRAME_SEGS.forEach((s, i) => { p['u_s' + i] = s; });
+    return {
+        key: 'bgFrame', kind: 'frame', x: 0, y: 0, w: 1920, h: 720, params: p,
+        colors: (t) => ({ color: [atk.on ? t.red : t.frame, atk.on ? 1 : 0.8] }),
+        dyn: () => ({ u_hot: [atk.on ? 1 : 0] }),
+    };
+}
+/** A borderless performance readout: a short accent tick (drive-mode coloured), a prominent value, a small label
+ * under it - no card. align 0 left, 1 right. The tick sits above the attack wash. */
 function readout(key, x, y, w, label, value, align, vcol) {
     const tickX = align === 1 ? x + w - 64 : x;
     return [
-        { key: key + 'Ln', kind: 'flat', x: tickX, y, w: 64, h: 3, colors: (t) => ({ color: [atk.on ? t.red : t.impact, 1] }) },
+        { key: key + 'Ln', kind: 'flat', x: tickX, y, w: 64, h: 3, z: -50, colors: (t, d) => ({ color: [accentOf(d), 1] }) },
         C.text(key, x, y + 11, w, 46, value, vcol || white, { align }),
         C.text(key + 'L', x, y + 60, w, 15, label, lbl, { align, tracking: 0.14 }),
     ];
@@ -213,7 +255,7 @@ module.exports = {
         const speedP = [C.text('speedDigits', 72, 252, 420, 166, (d) => C.speedText(o, d), white, { align: 0 }),
             C.text('speedUnit', 74, 426, 420, 26, C.speedUnit(o), lbl, { align: 0, tracking: 0.12 })];
         const arc = arcBar(o, 960, 1650, 1500, 20, 16.5);             // centre x, centre y (below glass), radius, thickness, half-sweep°
-        const centre = [arc, gearP, chevL, chevR, progP].concat(speedP);
+        const centre = [frame(), arc, gearP, chevL, chevR, progP].concat(speedP);
 
         /* Staged on-car diagnostic mode (development only). Production never sets a stage: app.json exposes no
          * such setting and the Store build passes none, so STAGE is 'D' and the list below is the full layout.

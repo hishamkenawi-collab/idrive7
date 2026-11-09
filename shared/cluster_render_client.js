@@ -532,6 +532,10 @@ class ClusterRender extends EventEmitter {
     }
 
     status() { this._send({ op: 'status' }); }
+
+    /* Bytes written to the socket but not yet flushed to the OS. For the black-square diagnostics: if this is
+     * > 0 when close() runs its destroy(), those drop ops are discarded and never reach the renderer. */
+    pendingBytes() { return this.sock ? (this.sock.writableLength || 0) : 0; }
 }
 
 module.exports = { ClusterRender, DEFAULT_PATH };

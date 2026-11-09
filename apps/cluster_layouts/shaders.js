@@ -880,4 +880,43 @@ void main() {
     gl_FragColor = vec4(u_color.rgb, clamp(a, 0.0, 1.0));
 }`;
 
-module.exports = { HIGHP, COMMON, GLYPH, FLAT_FS, PANEL_FS, DIAL_FS, BAND_FS, TEXT_FS, BG_FS, ICON_FS, SPARK_FS, CAR_FS, LEDS_FS, FLAG_FS, EAGLE_FS, FIREWORKS_FS, GEAR_FS, ATTACK_FS, CHEV_FS };
+/*
+ * FRAME_FS - the angular cluster frame drawn as one clearance-exempt background layer: the central trapezoid
+ * that holds speed+gear+rev, and the two side housings for the temperatures and the boost/torque. Thin bright
+ * strokes (the M-concept silhouette) in u_color, swelling red with u_hot in the attack. The segments are passed
+ * as vec4 endpoints (x0,y0,x1,y1 in 1920x720 panel pixels) so the layout can tune the silhouette without a
+ * shader edit. u_nseg says how many are live.
+ */
+const FRAME_FS = `#version 100
+${HIGHP}
+uniform vec2 u_size;
+uniform vec4 u_color;
+uniform float u_hot;
+uniform float u_nseg;
+uniform vec4 u_s0; uniform vec4 u_s1; uniform vec4 u_s2; uniform vec4 u_s3; uniform vec4 u_s4; uniform vec4 u_s5;
+uniform vec4 u_s6; uniform vec4 u_s7; uniform vec4 u_s8; uniform vec4 u_s9; uniform vec4 u_s10; uniform vec4 u_s11;
+varying vec2 v_uv;
+float sgd(vec2 p, vec4 s) { vec2 a = s.xy, b = s.zw, pa = p - a, ba = b - a; float h = clamp(dot(pa, ba) / max(dot(ba, ba), 1.0), 0.0, 1.0); return length(pa - ba * h); }
+void main() {
+    vec2 p = v_uv * u_size;
+    float n = u_nseg, d = 1e6;
+    if (n > 0.5) d = min(d, sgd(p, u_s0));
+    if (n > 1.5) d = min(d, sgd(p, u_s1));
+    if (n > 2.5) d = min(d, sgd(p, u_s2));
+    if (n > 3.5) d = min(d, sgd(p, u_s3));
+    if (n > 4.5) d = min(d, sgd(p, u_s4));
+    if (n > 5.5) d = min(d, sgd(p, u_s5));
+    if (n > 6.5) d = min(d, sgd(p, u_s6));
+    if (n > 7.5) d = min(d, sgd(p, u_s7));
+    if (n > 8.5) d = min(d, sgd(p, u_s8));
+    if (n > 9.5) d = min(d, sgd(p, u_s9));
+    if (n > 10.5) d = min(d, sgd(p, u_s10));
+    if (n > 11.5) d = min(d, sgd(p, u_s11));
+    float th = 1.8;
+    float core = smoothstep(th + 1.3, th - 0.4, d);
+    float glow = smoothstep(th * 8.0, th, d) * (0.06 + 0.6 * clamp(u_hot, 0.0, 1.0));
+    float a = core * u_color.a + glow * u_color.a * 0.5;
+    gl_FragColor = vec4(u_color.rgb, clamp(a, 0.0, 1.0));
+}`;
+
+module.exports = { HIGHP, COMMON, GLYPH, FLAT_FS, PANEL_FS, DIAL_FS, BAND_FS, TEXT_FS, BG_FS, ICON_FS, SPARK_FS, CAR_FS, LEDS_FS, FLAG_FS, EAGLE_FS, FIREWORKS_FS, GEAR_FS, ATTACK_FS, CHEV_FS, FRAME_FS };
