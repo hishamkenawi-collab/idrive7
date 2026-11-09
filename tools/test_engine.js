@@ -65,7 +65,8 @@ LAYOUTS.forEach((L) => {
         // drive programme on its own line) - from the layout's own gearText, so the test stays correct for each
         [L.gearText({ stage: 'D', gear: 3 }), '50'].forEach((x) => assert(t.indexOf(x) >= 0, x + ' in ' + JSON.stringify(t)));
         const vals = s.engine._pieces().filter((p) => p.value !== null).map((p) => p.value);
-        assert(vals.some((v) => Math.abs(v - 50) < 0.3 || Math.abs(v - 50 / 160) < 0.003), 'speed ' + vals);
+        // Supercar Attack shows the speed as digits only (no dial): its text, checked above, is the reading
+        assert(L.speedAsText || vals.some((v) => Math.abs(v - 50) < 0.3 || Math.abs(v - 50 / 160) < 0.003), 'speed ' + vals);
         s.stop();
     });
     check(id + ': S on the selector shows the sport gear', () => {

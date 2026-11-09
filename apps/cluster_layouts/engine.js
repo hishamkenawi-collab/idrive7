@@ -73,14 +73,19 @@ function startCluster(opts) {
     // stock map in Map view while a layer wants it (contend)
     const TARGET = opts.target || 'panel', contend = !!opts.contend, zShift = opts.z || 0;
     let specs = [], pieces = [], fontRef = 0, fontFam = null, shown = false, built = false, sweepEnd = 0, group = opts.group || null;
-    /* Black-square diagnostics (opt-in: CLUSTER_DIAG set). Off by default, so normal operation logs nothing new.
-     * When on, the stock-return path is traced - how many layers are dropped, and the renderer's own status
-     * immediately after hiding - so a real-car QR/USB log can show whether the renderer still thinks a layer
-     * exists after the layout handed the panel back. One line per transition, never per frame. */
-    const DIAG = !!(typeof process !== 'undefined' && process.env && process.env.CLUSTER_DIAG);
-    let diagWantStatus = false, hideAt = 0, lastSentAt = 0;
+    /* Black-square diagnostics, switched on in Settings > Cluster Layouts > "Black-square diagnostics" (the layout
+     * options' diag, from main.js), or by the CLUSTER_DIAG environment variable (a development override). Off means
+     * nothing new is logged. One line per transition, never per frame: the show (the renderer's slot table: which
+     * content sits in each slot), the hide (the layers dropped; the renderer's status at once), the slot table 3.5 s
+     * after the hide (is our panel still mapped after the release?), and the stock-reclaim event. So a log from the
+     * car can show whether a square is the KOMBI's own content, our own leftover mapping, or a late redraw. */
+    const ENV_DIAG = !!(typeof process !== 'undefined' && process.env && process.env.CLUSTER_DIAG);
+    const diagOn = () => ENV_DIAG || !!(opts.options && (opts.options() || {}).diag);
+    let diagWantStatus = false, diagShowRows = false, diagLateRows = false, hideAt = 0, lastSentAt = 0;
     const since = () => (hideAt ? '+' + (Date.now() - hideAt) + 'ms' : 't0');
-    const dlog = (m) => { if (DIAG) log.info('diag ' + since() + ': ' + m); };
+    const dlog = (m) => { if (diagOn()) log.info('diag ' + since() + ': ' + m); };
+    /* the slot lines of the renderer's status text: one per slot the KOMBI's latest reports name */
+    const slotRows = (text) => String(text || '').split('\n').filter((l) => /^\s*slot 0x/i.test(l)).map((l) => l.trim()).join(' | ') || '(no slot rows reported yet)';
     /* only the active group's pieces (a page) are built; pieces without a group always */
     const inGroup = (p) => !p.spec.group || p.spec.group === group;
     const hist = new Map();          // trend lines' samples by piece key, kept across pages and rebuilds
@@ -113,7 +118,10 @@ function startCluster(opts) {
     let statusText = '', statusAt = 0;
     cr.on('status', (text) => {
         statusText = String(text || '');
-        if (DIAG && diagWantStatus) { diagWantStatus = false; dlog('renderer status after hide (what it still reports drawing): ' + statusText.replace(/\s+/g, ' ').trim()); }
+        if (!diagOn()) return;
+        if (diagShowRows && shown) { diagShowRows = false; log.info('diag show: slot table as the renderer reports it: ' + slotRows(statusText)); }
+        if (hideAt && !diagLateRows && Date.now() - hideAt >= 3500) { diagLateRows = true; dlog('slot table 3.5 s after the hide (is our panel still mapped?): ' + slotRows(statusText)); }
+        if (diagWantStatus) { diagWantStatus = false; dlog('renderer status after hide (what it still reports drawing): ' + statusText.replace(/\s+/g, ' ').trim()); }
     });
     cr.on('error', (e) => { state.renderer = 'not reachable'; warnOnce(String((e && e.message) || e)); });
 
@@ -282,18 +290,19 @@ function startCluster(opts) {
         if (on) {
             build();
             shown = true;
+            if (diagOn()) { diagShowRows = true; diagLateRows = false; try { cr.status(); } catch (e) { /* not connected yet: the next answer will do */ } }
             pieces.forEach((p) => cr.set(p.ref, { visible: true }));
             if (!opts.sweep || opts.sweep()) sweep();
         } else {
             endSweep();
             shown = false;
-            hideAt = Date.now();
+            hideAt = Date.now(); diagLateRows = false;
             const refs = pieces.map((p) => p.ref);
-            if (DIAG) log.info('diag t0: HIDE at wall ' + hideAt + ' (' + new Date(hideAt).toISOString() + '); last custom frame ' + (lastSentAt ? (hideAt - lastSentAt) + 'ms ago' : 'n/a') + '; dropping ' + refs.length + ' layers refs [' + refs.join(',') + ']; font asset ' + fontRef + ' kept');
+            if (diagOn()) log.info('diag t0: HIDE at wall ' + hideAt + ' (' + new Date(hideAt).toISOString() + '); last custom frame ' + (lastSentAt ? (hideAt - lastSentAt) + 'ms ago' : 'n/a') + '; dropping ' + refs.length + ' layers refs [' + refs.join(',') + ']; font asset ' + fontRef + ' kept');
             pieces.forEach((p) => cr.drop(p.ref));
             pieces = []; built = false;
             dlog('all ' + refs.length + ' drop ops sent; client now holds ' + (fontRef ? '1 (font asset)' : '0') + ' layers; socket pending ' + (cr.pendingBytes ? cr.pendingBytes() : '?') + ' bytes');
-            if (DIAG) { diagWantStatus = true; try { cr.status(); } catch (e) { /* not connected: the renderer drops the scene on disconnect */ } }
+            if (diagOn()) { diagWantStatus = true; try { cr.status(); } catch (e) { /* not connected: the renderer drops the scene on disconnect */ } }
         }
         log.info(on ? 'layout shown on the cluster' : 'layout hidden: the stock cluster is back');
     }

@@ -2,7 +2,7 @@
   "id": "cluster_layouts",
   "title": "Cluster Layouts",
   "description": "Your own layout on the whole instrument cluster (round dials, gear, temperatures), drawn by the cluster itself",
-  "version": "0.13.6",
+  "version": "0.14.0",
   "startType": "autostart",
   "vendor": "custom",
   "loggingId": "OA9L",
@@ -217,6 +217,10 @@
         [
           "kenawiii",
           "Kenawiii"
+        ],
+        [
+          "supercar_reference",
+          "Supercar Reference"
         ]
       ]
     },
@@ -514,6 +518,22 @@
         40,
         45,
         50
+      ]
+    },
+    {
+      "key": "diag",
+      "label": "Black-square diagnostics (lines in Logs)",
+      "type": "choice",
+      "default": "on",
+      "options": [
+        [
+          "off",
+          "Off"
+        ],
+        [
+          "on",
+          "On"
+        ]
       ]
     }
   ],

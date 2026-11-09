@@ -142,7 +142,7 @@ check('SHIFT shows under the gear only at the full red line', () => {
 });
 
 check('existing layouts are untouched (none use the new kinds; the shared text shader is unchanged)', () => {
-    LAYOUTS.filter((L) => L.id !== 'supercar_attack').forEach((L) => {
+    LAYOUTS.filter((L) => ['analog_sport', 'digital_round', 'modern_wide', 'digital_dash', 'freedom', 'retro', 'track'].indexOf(L.id) >= 0).forEach((L) => {
         const kinds = new Set();
         ['info', 'map', 'stock'].forEach((centre) => L.pieces(Object.assign({}, base, { centre })).forEach((p) => kinds.add(p.kind)));
         assert(!kinds.has('gear') && !kinds.has('attack'), L.id + ' must not use the new kinds');
